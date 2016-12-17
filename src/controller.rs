@@ -4,6 +4,46 @@ use std::iter::Iterator;
 
 use simulation::{Simulation, SimData};
 
+pub trait Controller: Sized {
+    /// Returns the controller data at the current time.
+    fn take_data(&self) -> ControllerData;
+    /// Makes a single step in the algorithm.
+    fn control_step(&mut self) -> ControllerData;
+
+    fn control_until(&mut self, t_final: f64) -> ControlUntil<Self> {
+        ControlUntil {
+            controller: self,
+            t_final: t_final,
+        }
+    }
+}
+
+pub struct ControlUntil<'a, T>
+    where T: 'a + Controller
+{
+    controller: &'a mut T,
+    t_final: f64,
+}
+
+pub struct ControllerData {
+    pub sim_data: SimData,
+    pub rate: f64,
+}
+
+impl<'a, T> Iterator for ControlUntil<'a, T>
+    where T: 'a + Controller
+{
+    type Item = ControllerData;
+
+    fn next(&mut self) -> Option<ControllerData> {
+        if self.controller.take_data().sim_data.time > self.t_final {
+            None
+        } else {
+            Some(self.controller.control_step())
+        }
+    }
+}
+
 /// The standard controller algorithm
 pub struct StdController {
     sim: Simulation,
@@ -11,17 +51,6 @@ pub struct StdController {
     // Move up = `true`
     direction: bool,
     step_size: f64,
-}
-
-pub struct StdControlUntil<'a> {
-    controller: &'a mut StdController,
-    t_final: f64,
-}
-
-pub struct ControllerData {
-    /// The last data point taken
-    pub sim_data: SimData,
-    pub rate: f64,
 }
 
 impl StdController {
@@ -33,25 +62,20 @@ impl StdController {
             step_size: 0.03,
         }
     }
-
-    pub fn control_until(&mut self, t_final: f64) -> StdControlUntil {
-        StdControlUntil {
-            controller: self,
-            t_final: t_final,
-        }
-    }
 }
 
-impl<'a> Iterator for StdControlUntil<'a> {
-    type Item = ControllerData;
-
-    fn next(&mut self) -> Option<ControllerData> {
-        // Here is where we should implement the controller algorithm
-        let sim = &mut self.controller.sim;
-        let d1 = sim.take_data();
-        if d1.time > self.t_final {
-            return None;
+impl Controller for StdController {
+    fn take_data(&self) -> ControllerData {
+        ControllerData {
+            sim_data: self.sim.take_data(),
+            rate: self.last_rate,
         }
+    }
+
+    fn control_step(&mut self) -> ControllerData {
+        // Here is where we should implement the controller algorithm
+        let sim = &mut self.sim;
+        let d1 = sim.take_data();
         for _ in sim.run_for(1.0) {}
         let d2 = sim.take_data();
         for _ in sim.run_for(1.0) {}
@@ -64,30 +88,30 @@ impl<'a> Iterator for StdControlUntil<'a> {
         let e2 = (d3.time + d2.time) / 2.0;
         let rate = (p2 - p1) / (e2 - e1);
 
-        if rate < self.controller.last_rate {
+        if rate < self.last_rate {
             // Switch directions and decrease step size
-            self.controller.direction = !self.controller.direction;
-            self.controller.step_size *= 0.8;
+            self.direction = !self.direction;
+            self.step_size *= 0.8;
             // Make sure it doesn't get too low
-            if self.controller.step_size < 0.001 {
-                self.controller.step_size = 0.001;
+            if self.step_size < 0.001 {
+                self.step_size = 0.001;
             }
         }
 
         // Move motor
-        let step = if self.controller.direction {
-            self.controller.step_size
+        let step = if self.direction {
+            self.step_size
         } else {
-            -self.controller.step_size
+            -self.step_size
         };
         sim.set_freq(d3.frequency + step);
 
         // Give it time to settle
         for _ in sim.run_for(5.0) {}
 
-        Some(ControllerData {
+        ControllerData {
             sim_data: d3,
             rate: rate,
-        })
+        }
     }
 }
