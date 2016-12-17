@@ -200,6 +200,11 @@ impl Simulation {
         }
     }
 
+    pub fn run_for(&mut self, time: f64) -> RunUntil {
+        let t = self.t;
+        self.run_until(t + time)
+    }
+
     pub fn anneal(&mut self, time: f64, temperature: f64) {
         // Reset phi (i.e. remove negative effects of irradiation)
         self.phi = 0.0;
@@ -211,6 +216,18 @@ impl Simulation {
         let t = self.t;
         self.run_until(t + time);
         self.set_system_temperature(temp_tmp);
+    }
+
+    pub fn take_data(&self) -> SimData {
+        SimData {
+            time: self.t,
+            pn: self.pn,
+            pe: self.pe,
+            frequency: self.freq,
+            c: self.c,
+            temperature: self.temperature,
+            dose: self.dose,
+        }
     }
 
     fn set_temperature(&mut self, temperature: f64) {
@@ -292,27 +309,12 @@ impl Simulation {
     }
 }
 
-impl SimData {
-    /// Gets a data point from the simulation
-    pub fn from_sim(sim: &Simulation) -> SimData {
-        SimData {
-            time: sim.t,
-            pn: sim.pn,
-            pe: sim.pe,
-            frequency: sim.freq,
-            c: sim.c,
-            temperature: sim.temperature,
-            dose: sim.dose,
-        }
-    }
-}
-
 impl<'a> Iterator for RunUntil<'a> {
     type Item = SimData;
 
     fn next(&mut self) -> Option<SimData> {
         if self.sim.t < self.t_final {
-            let data = SimData::from_sim(self.sim);
+            let data = self.sim.take_data();
             self.sim.time_step();
             Some(data)
         } else {
