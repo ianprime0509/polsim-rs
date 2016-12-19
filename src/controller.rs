@@ -2,9 +2,13 @@
 
 use std::iter::Iterator;
 
+use rand;
+
 use simulation::{Simulation, SimData};
 
 pub trait Controller: Sized {
+    /// Creates a new controller for the given simulation
+    fn control_sim(sim: Simulation) -> Self;
     /// Returns the controller data at the current time.
     fn take_data(&self) -> ControllerData;
     /// Makes a single step in the algorithm.
@@ -53,8 +57,8 @@ pub struct StdController {
     step_size: f64,
 }
 
-impl StdController {
-    pub fn new(sim: Simulation) -> StdController {
+impl Controller for StdController {
+    fn control_sim(sim: Simulation) -> StdController {
         StdController {
             sim: sim,
             last_rate: 0.0,
@@ -62,9 +66,7 @@ impl StdController {
             step_size: 0.03,
         }
     }
-}
 
-impl Controller for StdController {
     fn take_data(&self) -> ControllerData {
         ControllerData {
             sim_data: self.sim.take_data(),
@@ -98,6 +100,9 @@ impl Controller for StdController {
             }
         }
 
+        // Update last rate
+        self.last_rate = rate;
+
         // Move motor
         let step = if self.direction {
             self.step_size
@@ -112,6 +117,136 @@ impl Controller for StdController {
         ControllerData {
             sim_data: d3,
             rate: rate,
+        }
+    }
+}
+
+/// The standard controller algorithm (variant)
+pub struct StdController2 {
+    sim: Simulation,
+    last_rate: f64,
+    // Move up = `true`
+    direction: bool,
+    step_size: f64,
+}
+
+impl Controller for StdController2 {
+    fn control_sim(sim: Simulation) -> StdController2 {
+        StdController2 {
+            sim: sim,
+            last_rate: 0.0,
+            direction: true,
+            step_size: 0.03,
+        }
+    }
+
+    fn take_data(&self) -> ControllerData {
+        ControllerData {
+            sim_data: self.sim.take_data(),
+            rate: self.last_rate,
+        }
+    }
+
+    fn control_step(&mut self) -> ControllerData {
+        // Here is where we should implement the controller algorithm
+        let sim = &mut self.sim;
+        let d1 = sim.take_data();
+        for _ in sim.run_for(1.0) {}
+        let d2 = sim.take_data();
+        for _ in sim.run_for(1.0) {}
+        let d3 = sim.take_data();
+
+        // Calculate rate
+        let r1 = (d2.pn - d1.pn) / (d2.time - d1.time);
+        let r2 = (d3.pn - d2.pn) / (d3.time - d2.time);
+        let rate = (r1 + r2) / 2.0;
+
+        if rate < self.last_rate {
+            // Switch directions and decrease step size
+            self.direction = !self.direction;
+            self.step_size *= 0.8;
+            // Make sure it doesn't get too low
+            if self.step_size < 0.001 {
+                self.step_size = 0.001;
+            }
+        }
+
+        // Update last rate
+        self.last_rate = rate;
+
+        // Move motor
+        let step = if self.direction {
+            self.step_size
+        } else {
+            -self.step_size
+        };
+        sim.set_freq(d3.frequency + step);
+
+        // Give it time to settle
+        for _ in sim.run_for(5.0) {}
+
+        ControllerData {
+            sim_data: d3,
+            rate: rate,
+        }
+    }
+}
+// A random controller (control group)
+pub struct RandController {
+    sim: Simulation,
+    last_rate: f64,
+    direction: bool,
+    step_size: f64,
+}
+
+impl Controller for RandController {
+    fn control_sim(sim: Simulation) -> RandController {
+        RandController {
+            sim: sim,
+            last_rate: 0.0,
+            direction: true,
+            step_size: 0.03,
+        }
+    }
+
+    fn take_data(&self) -> ControllerData {
+        ControllerData {
+            sim_data: self.sim.take_data(),
+            rate: self.last_rate,
+        }
+    }
+
+    fn control_step(&mut self) -> ControllerData {
+        // Here is where we should implement the controller algorithm
+        let sim = &mut self.sim;
+        for _ in sim.run_for(1.0) {}
+        for _ in sim.run_for(1.0) {}
+        let d3 = sim.take_data();
+
+        if rand::random() {
+            // Switch directions and decrease step size
+            self.direction = !self.direction;
+            self.step_size *= 0.8;
+            // Make sure it doesn't get too low
+            if self.step_size < 0.001 {
+                self.step_size = 0.001;
+            }
+        }
+
+        // Move motor
+        let step = if self.direction {
+            self.step_size
+        } else {
+            -self.step_size
+        };
+        sim.set_freq(d3.frequency + step);
+
+        // Give it time to settle
+        for _ in sim.run_for(5.0) {}
+
+        ControllerData {
+            sim_data: d3,
+            rate: 0.0,
         }
     }
 }
