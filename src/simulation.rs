@@ -91,6 +91,7 @@ pub struct SimBuilder {
 }
 
 /// A single "data point" containing all observable data at a particular time
+#[derive(Clone)]
 pub struct SimData {
     pub time: f64,
     pub pn: f64,

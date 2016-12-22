@@ -7,12 +7,12 @@ use std::collections::HashMap;
 use std::thread;
 use std::time::Instant;
 
-use controller::{Controller, StdController, StdController2, RandController};
+use controller::{Controller, StdController, StdController2, RandController, KValController};
 use simulation::SimBuilder;
 
 fn main() {
     let n_trials = 100;
-    let init_freq = 140.15;
+    let init_freq = 140.20;
     let min_freq = 140.17;
     let max_freq = 140.25;
     let time = 300.0;
@@ -31,6 +31,10 @@ fn main() {
     tests.insert("RandController",
                  thread::spawn(move || {
                      test_complete::<RandController>(n_trials, init_freq, min_freq, max_freq, time)
+                 }));
+    tests.insert("KValController",
+                 thread::spawn(move || {
+                     test_complete::<KValController>(n_trials, init_freq, min_freq, max_freq, time)
                  }));
 
     // Get results
@@ -52,14 +56,6 @@ fn main() {
     println!("Time: {} ms", bench);
 }
 
-/// Tests a controller, to see if after `time` it'll end up in the given frequency range.
-fn test_controller<T: Controller>(min_freq: f64, max_freq: f64, time: f64, mut cont: T) -> bool {
-    for _ in cont.control_until(time) {}
-    let d = cont.take_data();
-
-    min_freq <= d.sim_data.frequency && max_freq >= d.sim_data.frequency
-}
-
 /// A more complete test, with multiple trials. Returns the number of successful trials.
 fn test_complete<T: Controller>(n_trials: i32,
                                 init_freq: f64,
@@ -68,14 +64,22 @@ fn test_complete<T: Controller>(n_trials: i32,
                                 time: f64)
                                 -> i32 {
     let mut n_success = 0;
+    let mut sum = 0.0;
 
     for _ in 0..n_trials {
         let sim = SimBuilder::new(init_freq).build();
-        let cont = T::control_sim(sim);
-        if test_controller(min_freq, max_freq, time, cont) {
+        let mut cont = T::from_sim(sim);
+        for _ in cont.control_until(time) {}
+        let d = cont.take_data();
+        sum += d.sim_data.frequency;
+
+        if min_freq <= d.sim_data.frequency && max_freq >= d.sim_data.frequency {
             n_success += 1;
         }
     }
+
+    println!("s = {}", n_success as f64 / n_trials as f64);
+    println!("avg = {}", sum / n_trials as f64);
 
     n_success
 }
