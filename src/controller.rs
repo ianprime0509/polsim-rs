@@ -13,7 +13,7 @@ pub trait Controller: Sized {
     /// Returns the controller data at the current time.
     fn take_data(&self) -> ControllerData;
     /// Makes a single step in the algorithm.
-    fn control_step(&mut self) -> ControllerData;
+    fn control_step(&mut self);
 
     fn control_until(&mut self, t_final: f64) -> ControlUntil<Self> {
         ControlUntil {
@@ -41,10 +41,13 @@ impl<'a, T> Iterator for ControlUntil<'a, T>
     type Item = ControllerData;
 
     fn next(&mut self) -> Option<ControllerData> {
-        if self.controller.take_data().sim_data.time > self.t_final {
+        let data = self.controller.take_data();
+
+        if data.sim_data.time > self.t_final {
             None
         } else {
-            Some(self.controller.control_step())
+            self.controller.control_step();
+            Some(data)
         }
     }
 }
@@ -88,7 +91,7 @@ impl<T> Controller for ThreePointController<T>
         }
     }
 
-    fn control_step(&mut self) -> ControllerData {
+    fn control_step(&mut self) {
         // Here is where we should implement the controller algorithm
         let sim = &mut self.sim;
         let d1 = sim.take_data();
@@ -123,11 +126,6 @@ impl<T> Controller for ThreePointController<T>
 
         // Give it time to settle
         for _ in sim.run_for(5.0) {}
-
-        ControllerData {
-            sim_data: d3,
-            rate: rate,
-        }
     }
 }
 
@@ -217,7 +215,7 @@ impl Controller for RandController {
         }
     }
 
-    fn control_step(&mut self) -> ControllerData {
+    fn control_step(&mut self) {
         // Here is where we should implement the controller algorithm
         let sim = &mut self.sim;
         for _ in sim.run_for(1.0) {}
@@ -244,10 +242,5 @@ impl Controller for RandController {
 
         // Give it time to settle
         for _ in sim.run_for(5.0) {}
-
-        ControllerData {
-            sim_data: d3,
-            rate: 0.0,
-        }
     }
 }

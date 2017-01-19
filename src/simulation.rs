@@ -8,11 +8,11 @@ use std::iter::Iterator;
 use rand;
 
 /// Elementary charge (in C)
-pub static ELEM_CHARGE: f64 = 1.602176662e-19;
+pub const ELEM_CHARGE: f64 = 1.602176662e-19;
 
 /// Parameters for alpha/beta vs frequency fit
-static FIT_A: f64 = 0.545266;
-static FIT_S: f64 = 0.088415;
+const FIT_A: f64 = 0.545266;
+const FIT_S: f64 = 0.088415;
 
 /// The m1 and m2 parameters are the centers of the beta/alpha
 /// distributions, respectively. The actual center changes
@@ -23,29 +23,29 @@ static FIT_S: f64 = 0.088415;
 /// which itself got these parameters from the SANE frequency vs dose data.
 /// The FIT_M1_BASE and FIT_M2_BASE parameters are the centers of the distributions
 /// when polarizing with the beam off (in GHz).
-static FIT_M1_BASE: f64 = 140.286;
-static FIT_M1_COEFF: f64 = 0.045;
-static FIT_M1_RATE: f64 = -0.38e-15;
-static FIT_M2_BASE: f64 = 140.468;
-static FIT_M2_COEFF: f64 = -0.065;
-static FIT_M2_RATE: f64 = -3.8e-15;
+const FIT_M1_BASE: f64 = 140.286;
+const FIT_M1_COEFF: f64 = 0.045;
+const FIT_M1_RATE: f64 = -0.38e-15;
+const FIT_M2_BASE: f64 = 140.468;
+const FIT_M2_COEFF: f64 = -0.065;
+const FIT_M2_RATE: f64 = -3.8e-15;
 
 /// Simulation parameters
-static TIME_STEP: f64 = 1.0;
-static N_ITER: i32 = 1000;
+const TIME_STEP: f64 = 1.0;
+const N_ITER: i32 = 1000;
 
 /// Randomness parameters:
 /// There are fluctuations caused by thermal effects which will manifest as
 /// a fraction of the polarization value, but there are also fluctuations
 /// which will manifest uniformly at any polarization (even at 0);
 /// these are probably measurement uncertainties
-static THERMAL_RANDOMNESS: f64 = 0.02;
-static BASE_RANDOMNESS: f64 = 0.002;
+const THERMAL_RANDOMNESS: f64 = 0.02;
+const BASE_RANDOMNESS: f64 = 0.002;
 
 /// Not sure what kind of a parameter this is
 /// Whenever the beam is on, C is increased according to
 /// (delta)C = IRRADIATION_FACTOR * beam_current * (delta)t
-static IRRADIATION_FACTOR: f64 = 1e-10;
+const IRRADIATION_FACTOR: f64 = 1e-10;
 
 /// Represents a solid polarized target experiment.
 pub struct Simulation {

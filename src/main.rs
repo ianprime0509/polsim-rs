@@ -12,7 +12,7 @@ use simulation::SimBuilder;
 
 fn main() {
     let n_trials = 100;
-    let init_freq = 140.20;
+    let init_freq = 140.15;
     let min_freq = 140.17;
     let max_freq = 140.25;
     let time = 300.0;
@@ -40,12 +40,13 @@ fn main() {
     // Get results
     for (name, test) in tests {
         match test.join() {
-            Ok(n) => {
-                println!("{}: success {} / {} = {}",
+            Ok((n, freq)) => {
+                println!("{}: success {} / {} = {}; avg. freq = {}",
                          name,
                          n,
                          n_trials,
-                         n as f64 / n_trials as f64)
+                         n as f64 / n_trials as f64,
+                         freq)
             }
             Err(_) => println!("{}: panicked", name),
         }
@@ -56,13 +57,14 @@ fn main() {
     println!("Time: {} ms", bench);
 }
 
-/// A more complete test, with multiple trials. Returns the number of successful trials.
+/// A more complete test, with multiple trials. Returns the number of successful trials and the
+/// average frequency.
 fn test_complete<T: Controller>(n_trials: i32,
                                 init_freq: f64,
                                 min_freq: f64,
                                 max_freq: f64,
                                 time: f64)
-                                -> i32 {
+                                -> (i32, f64) {
     let mut n_success = 0;
     let mut sum = 0.0;
 
@@ -78,8 +80,5 @@ fn test_complete<T: Controller>(n_trials: i32,
         }
     }
 
-    println!("s = {}", n_success as f64 / n_trials as f64);
-    println!("avg = {}", sum / n_trials as f64);
-
-    n_success
+    (n_success, sum / n_trials as f64)
 }
