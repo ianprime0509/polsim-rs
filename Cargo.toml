@@ -1,7 +1,8 @@
 [package]
+authors = ["Ian Johnson <ianprime0509@gmail.com>"]
 name = "polsim-rs"
 version = "0.1.0"
-authors = ["Ian Johnson <ianprime0509@gmail.com>"]
 
 [dependencies]
+error-chain = "0.10.0"
 rand = "0.3.15"

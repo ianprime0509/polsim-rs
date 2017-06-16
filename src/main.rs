@@ -1,84 +1,130 @@
+#[macro_use]
+extern crate error_chain;
 extern crate rand;
 
-mod controller;
+mod errors {
+    error_chain!{}
+}
+use errors::*;
+
+mod pdp;
 mod simulation;
 
-use std::collections::HashMap;
-use std::thread;
-use std::time::Instant;
+use std::fs::File;
+use std::io::{self, Write};
 
-use controller::{Controller, StdController, StdController2, RandController, KValController};
-use simulation::SimBuilder;
+use pdp::Pdp;
+use simulation::Builder;
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() {
-    let n_trials = 100;
-    let init_freq = 140.15;
-    let min_freq = 140.17;
-    let max_freq = 140.25;
-    let time = 300.0;
+    println!("Welcome to polsim v{}.", VERSION);
 
-    let start = Instant::now();
-    // Do tests for each controller in a different thread
-    let mut tests = HashMap::new();
-    tests.insert("StdController",
-                 thread::spawn(move || {
-                     test_complete::<StdController>(n_trials, init_freq, min_freq, max_freq, time)
-                 }));
-    tests.insert("StdController2",
-                 thread::spawn(move || {
-                     test_complete::<StdController2>(n_trials, init_freq, min_freq, max_freq, time)
-                 }));
-    tests.insert("RandController",
-                 thread::spawn(move || {
-                     test_complete::<RandController>(n_trials, init_freq, min_freq, max_freq, time)
-                 }));
-    tests.insert("KValController",
-                 thread::spawn(move || {
-                     test_complete::<KValController>(n_trials, init_freq, min_freq, max_freq, time)
-                 }));
+    loop {
+        match run() {
+            Ok(true) => break,
+            Ok(false) => {}
+            Err(e) => {
+                eprintln!("Error: {}", e.iter().nth(0).unwrap());
 
-    // Get results
-    for (name, test) in tests {
-        match test.join() {
-            Ok((n, freq)) => {
-                println!("{}: success {} / {} = {}; avg. freq = {}",
-                         name,
-                         n,
-                         n_trials,
-                         n as f64 / n_trials as f64,
-                         freq)
+                for cause in e.iter().skip(1) {
+                    eprintln!("Caused by: {}", cause);
+                }
+
+                if let Some(backtrace) = e.backtrace() {
+                    eprintln!("Backtrace: {:?}", backtrace);
+                }
+                std::process::exit(1);
             }
-            Err(_) => println!("{}: panicked", name),
+        }
+    }
+}
+
+fn run() -> Result<bool> {
+    println!();
+    match prompt("Choose operation:")?.as_str() {
+        "pdp" => pdp()?,
+        "sim" => sim()?,
+        "help" => {
+            println!("Available commands are:
+---- pdp: Simulate the PDP environment
+---- sim: Run the simulation without sweeping")
+        }
+        "quit" => return Ok(true),
+        s => {
+            println!("Unknown command `{}`. Type `help` for available commands.",
+                     s)
         }
     }
 
-    let elapsed = start.elapsed();
-    let bench = (elapsed.as_secs() as f64 * 1000.0) + (elapsed.subsec_nanos() as f64 / 1e6);
-    println!("Time: {} ms", bench);
+    Ok(false)
 }
 
-/// A more complete test, with multiple trials. Returns the number of successful trials and the
-/// average frequency.
-fn test_complete<T: Controller>(n_trials: i32,
-                                init_freq: f64,
-                                min_freq: f64,
-                                max_freq: f64,
-                                time: f64)
-                                -> (i32, f64) {
-    let mut n_success = 0;
-    let mut sum = 0.0;
-
-    for _ in 0..n_trials {
-        let sim = SimBuilder::new(init_freq).build();
-        let mut cont = T::from_sim(sim);
-        for _ in cont.control_until(time) {}
-        let d = cont.take_data();
-        sum += d.sim_data.frequency;
-
-        if min_freq <= d.sim_data.frequency && max_freq >= d.sim_data.frequency {
-            n_success += 1;
+fn pdp() -> Result<()> {
+    let mut output: Box<Write> = match prompt("Output file name (leave blank for stdout):")?
+              .as_str() {
+        "" => Box::new(io::stdout()),
+        s => {
+            Box::new(File::create(s)
+                         .chain_err(|| format!("could not create output file `{}`", s))?)
         }
+    };
+    let freq = prompt("Frequency (GHz):")?
+        .parse::<f64>()
+        .chain_err(|| "invalid frequency")?;
+    let time = prompt("Time to run (s):")?
+        .parse::<f64>()
+        .chain_err(|| "invalid time")?;
+    let n_sweeps = prompt("Number of sweeps:")?
+        .parse::<u32>()
+        .chain_err(|| "invalid number of sweeps")?;
+
+    let mut pdp = Pdp::new(Builder::new(freq).build(), n_sweeps);
+    for data in pdp.run_for_iter(time) {
+        writeln!(output, "{}", data.to_csv())
+            .chain_err(|| "could not write to output file")?;
     }
 
-    (n_success, sum / n_trials as f64)
+    Ok(())
 }
+
+fn sim() -> Result<()> {
+    let mut output: Box<Write> = match prompt("Output file name (leave blank for stdout):")?
+              .as_str() {
+        "" => Box::new(io::stdout()),
+        s => {
+            Box::new(File::create(s)
+                         .chain_err(|| format!("could not create output file `{}`", s))?)
+        }
+    };
+    let freq = prompt("Frequency (GHz):")?
+        .parse::<f64>()
+        .chain_err(|| "invalid frequency")?;
+    let time = prompt("Time to run (s):")?
+        .parse::<f64>()
+        .chain_err(|| "invalid time")?;
+
+    let mut sim = Builder::new(freq).build();
+    for data in sim.run_for_iter(time, 0.001, 1.0) {
+        writeln!(output, "{}", data.to_csv())
+            .chain_err(|| "could not write to output file")?;
+    }
+
+    Ok(())
+}
+
+fn prompt(title: &str) -> Result<String> {
+    print!("{} ", title);
+    io::stdout()
+        .flush()
+        .chain_err(|| "could not flush prompt to stdout")?;
+
+    let mut buf = String::new();
+    io::stdin()
+        .read_line(&mut buf)
+        .chain_err(|| "could not read input from stdin")?;
+
+    Ok(buf.trim().into())
+}
+

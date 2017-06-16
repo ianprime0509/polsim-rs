@@ -30,10 +30,6 @@ const FIT_M2_BASE: f64 = 140.468;
 const FIT_M2_COEFF: f64 = -0.065;
 const FIT_M2_RATE: f64 = -3.8e-15;
 
-/// Simulation parameters
-const TIME_STEP: f64 = 1.0;
-const N_ITER: i32 = 1000;
-
 /// Randomness parameters:
 /// There are fluctuations caused by thermal effects which will manifest as
 /// a fraction of the polarization value, but there are also fluctuations
@@ -80,7 +76,7 @@ pub struct Simulation {
 }
 
 /// For building `Simulation`s using the builder pattern
-pub struct SimBuilder {
+pub struct Builder {
     freq: f64,
     pn: f64,
     pe: f64,
@@ -92,7 +88,7 @@ pub struct SimBuilder {
 
 /// A single "data point" containing all observable data at a particular time
 #[derive(Clone)]
-pub struct SimData {
+pub struct Data {
     pub time: f64,
     pub pn: f64,
     pub pe: f64,
@@ -102,15 +98,24 @@ pub struct SimData {
     pub dose: f64,
 }
 
-/// An iterator returning data points for each time step
+/// An iterator returning data points for each time step.
 pub struct RunUntil<'a> {
     sim: &'a mut Simulation,
     t_final: f64,
+    t_inc: f64,
+    output_interval: f64,
 }
 
-impl SimBuilder {
-    pub fn new(freq: f64) -> SimBuilder {
-        SimBuilder {
+impl Data {
+    /// Returns a string with the data in CSV format.
+    pub fn to_csv(&self) -> String {
+        format!("{}, {}, {}", self.time as i64, self.pn, self.frequency)
+    }
+}
+
+impl Builder {
+    pub fn new(freq: f64) -> Self {
+        Builder {
             freq: freq,
             pn: 0.0,
             pe: -1.0,
@@ -121,23 +126,23 @@ impl SimBuilder {
         }
     }
 
-    pub fn initial_pol(&mut self, t1n: f64, t1e: f64) -> &mut SimBuilder {
+    pub fn initial_pol(&mut self, t1n: f64, t1e: f64) -> &mut Self {
         self.t1n = t1n;
         self.t1e = t1e;
         self
     }
 
-    pub fn c(&mut self, c: f64) -> &mut SimBuilder {
+    pub fn c(&mut self, c: f64) -> &mut Self {
         self.c = c;
         self
     }
 
-    pub fn temperature(&mut self, temperature: f64) -> &mut SimBuilder {
+    pub fn temperature(&mut self, temperature: f64) -> &mut Self {
         self.temperature = temperature;
         self
     }
 
-    pub fn physical_constants(&mut self, t1n: f64, t1e: f64) -> &mut SimBuilder {
+    pub fn physical_constants(&mut self, t1n: f64, t1e: f64) -> &mut Self {
         self.t1n = t1n;
         self.t1e = t1e;
         self
@@ -194,16 +199,29 @@ impl Simulation {
         self.beam_current = 0.0;
     }
 
-    pub fn run_until(&mut self, t_final: f64) -> RunUntil {
-        RunUntil {
-            sim: self,
-            t_final: t_final,
+    pub fn run_until(&mut self, t_final: f64, t_inc: f64) {
+        while self.t < t_final {
+            self.time_step(t_inc);
         }
     }
 
-    pub fn run_for(&mut self, time: f64) -> RunUntil {
+    pub fn run_for(&mut self, time: f64, t_inc: f64) {
         let t = self.t;
-        self.run_until(t + time)
+        self.run_until(t + time, t_inc)
+    }
+
+    pub fn run_until_iter(&mut self, t_final: f64, t_inc: f64, output_interval: f64) -> RunUntil {
+        RunUntil {
+            sim: self,
+            t_final,
+            t_inc,
+            output_interval,
+        }
+    }
+
+    pub fn run_for_iter(&mut self, time: f64, t_inc: f64, output_interval: f64) -> RunUntil {
+        let t = self.t;
+        self.run_until_iter(t + time, t_inc, output_interval)
     }
 
     pub fn anneal(&mut self, time: f64, temperature: f64) {
@@ -215,12 +233,12 @@ impl Simulation {
         let temp_tmp = self.system_temperature;
         self.set_system_temperature(temperature);
         let t = self.t;
-        self.run_until(t + time);
+        self.run_until(t + time, 0.001);
         self.set_system_temperature(temp_tmp);
     }
 
-    pub fn take_data(&self) -> SimData {
-        SimData {
+    pub fn take_data(&self) -> Data {
+        Data {
             time: self.t,
             pn: self.pn,
             pe: self.pe,
@@ -236,7 +254,7 @@ impl Simulation {
         self.temperature = temperature;
     }
 
-    fn time_step(&mut self) {
+    fn time_step(&mut self, time: f64) {
         // Parameters for temperature change (exponential growth/decay)
         // TEMP_SS = steady-state temperature
         // K_TEMP = rate of exponential increase
@@ -250,39 +268,33 @@ impl Simulation {
         let k_phi = self.beam_current / 1e7;
         let phi_ss = 0.001;
 
-        for _ in 0..N_ITER {
-            // Calculate constants (for convenience)
-            let a_const = -self.t1e / self.t1n - (self.c / 2.0) * (self.alpha + self.beta) -
-                          self.phi;
-            let b_const = (self.c / 2.0) * (self.alpha - self.beta);
-            let c_const = (self.alpha - self.beta) / 2.0;
-            let d_const = -1.0 - (self.alpha + self.beta) / 2.0;
+        // Calculate constants (for convenience)
+        let a_const = -self.t1e / self.t1n - (self.c / 2.0) * (self.alpha + self.beta) - self.phi;
+        let b_const = (self.c / 2.0) * (self.alpha - self.beta);
+        let c_const = (self.alpha - self.beta) / 2.0;
+        let d_const = -1.0 - (self.alpha + self.beta) / 2.0;
 
-            // Calculate rates
-            let pn_prime = (a_const * self.pn_raw + b_const * self.pe) / self.t1e;
-            let pe_prime = (c_const * self.pn_raw + d_const * self.pe + self.pe0) / self.t1e;
+        // Calculate rates
+        let pn_prime = (a_const * self.pn_raw + b_const * self.pe) / self.t1e;
+        let pe_prime = (c_const * self.pn_raw + d_const * self.pe + self.pe0) / self.t1e;
 
-            // Shortcut calculation
-            let time_amt = TIME_STEP / N_ITER as f64;
+        // Update pn and pe (Euler's method)
+        self.pn_raw += pn_prime * time;
+        self.pe += pe_prime * time;
+        // Update temperature and phi
+        let temp = self.temperature;
+        self.set_temperature(temp + time * k_temp * (temp_ss - temp));
+        self.phi += time * k_phi * (phi_ss - self.phi);
 
-            // Update pn and pe (Euler's method)
-            self.pn_raw += pn_prime * time_amt;
-            self.pe += pe_prime * time_amt;
-            // Update temperature and phi
-            let temp = self.temperature;
-            self.set_temperature(temp + time_amt * k_temp * (temp_ss - temp));
-            self.phi += time_amt * k_phi * (phi_ss - self.phi);
+        // Update C and dose
+        self.c += IRRADIATION_FACTOR * self.beam_current * time;
+        self.dose += (self.beam_current * 1e-9 / ELEM_CHARGE) * time;
 
-            // Update C and dose
-            self.c += IRRADIATION_FACTOR * self.beam_current * time_amt;
-            self.dose += (self.beam_current * 1e-9 / ELEM_CHARGE) * time_amt;
+        // Calculate new transition rates (alpha and beta)
+        self.calc_transition_rates();
 
-            // Calculate new transition rates (alpha and beta)
-            self.calc_transition_rates();
-
-            // Update time
-            self.t += time_amt;
-        }
+        // Update time
+        self.t += time;
 
         // Update "noisy pn"
         self.pn = self.pn_noisy();
@@ -311,12 +323,12 @@ impl Simulation {
 }
 
 impl<'a> Iterator for RunUntil<'a> {
-    type Item = SimData;
+    type Item = Data;
 
-    fn next(&mut self) -> Option<SimData> {
+    fn next(&mut self) -> Option<Data> {
         if self.sim.t < self.t_final {
             let data = self.sim.take_data();
-            self.sim.time_step();
+            self.sim.run_for(self.output_interval, self.t_inc);
             Some(data)
         } else {
             None
